@@ -8,7 +8,7 @@ __all__ = [
     'gen_link', 
     'subscribe',
     'get_seconds',
-    'progress_bar',
+    'progress_callback',
     'humanbytes',
     'TimeFormatter',
     'convert',
@@ -16,7 +16,6 @@ __all__ = [
     'get_link',
     'video_metadata',
     'screenshot',
-    'progress_callback',
     'prog_bar',
     'get_chat_id',
     'split_and_upload_file'
@@ -319,7 +318,7 @@ async def progress_callback(current, total, ud_type, message, start):
 async def prog_bar(current, total, ud_type, message, start):
     """Alternative progress bar implementation"""
     try:
-        await progress_bar(current, total, ud_type, message, start)
+        await progress_callback(current, total, ud_type, message, start)
     except Exception as e:
         logger.error(f"Error in prog_bar: {e}")
 
@@ -368,7 +367,7 @@ async def split_and_upload_file(app, sender, file, caption):
                         document=part_file,
                         caption=part_caption,
                         parse_mode=ParseMode.MARKDOWN,
-                        progress=progress_bar,
+                        progress=progress_callback,
                         progress_args=(
                             "╭─────────────────────╮\n│ **__Pyro Uploader__**\n├─────────────────────",
                             edit,
