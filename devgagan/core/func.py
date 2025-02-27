@@ -18,7 +18,8 @@ __all__ = [
     'screenshot',
     'progress_callback',
     'prog_bar',
-    'get_chat_id'
+    'get_chat_id',
+    'split_and_upload_file'
 ]
 
 import math
@@ -28,8 +29,10 @@ import os
 import cv2
 import asyncio
 import logging
+import aiofiles
 from datetime import datetime as dt
 from pyrogram import enums
+from pyrogram.enums import ParseMode
 from config import CHANNEL_ID, OWNER_ID 
 from devgagan.core.mongo.plans_db import premium_users
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -42,6 +45,18 @@ from pyrogram.errors import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Constants
+SIZE_LIMIT = 2 * 1024 * 1024 * 1024  # 2GB
+PROGRESS_BAR = """
+│ **__Completed:__** {1}/{2}
+│ **__Bytes:__** {0}%
+│ **__Speed:__** {3}/s
+│ **__ETA:__** {4}
+╰─────────────────────╯
+"""
+
+last_update_time = time.time()
 
 async def chk_user(message, user_id):
     """Check if user is premium or owner"""
@@ -226,10 +241,7 @@ async def screenshot(video_path, duration, user_id):
             cap.release()
 
 async def get_chat_id(app, chat_link):
-    """
-    Get chat ID from a channel username or invite link
-    Returns: (chat_id, error_message)
-    """
+    """Get chat ID from a channel username or invite link"""
     try:
         # Handle t.me links
         if 't.me/' in chat_link:
@@ -258,17 +270,6 @@ async def get_chat_id(app, chat_link):
             
     except Exception as e:
         return None, f"Error processing link: {str(e)}"
-
-# Progress bar constants
-PROGRESS_BAR = """
-│ **__Completed:__** {1}/{2}
-│ **__Bytes:__** {0}%
-│ **__Speed:__** {3}/s
-│ **__ETA:__** {4}
-╰─────────────────────╯
-"""
-
-last_update_time = time.time()
 
 async def progress_callback(current, total, progress_message):
     """Handle progress updates for file operations"""
@@ -337,3 +338,75 @@ async def prog_bar(current, total, ud_type, message, start):
         await progress_bar(current, total, ud_type, message, start)
     except Exception as e:
         logger.error(f"Error in prog_bar: {e}")
+
+async def split_and_upload_file(app, sender, file, caption):
+    """Split large files and upload them in parts"""
+    try:
+        if not os.path.exists(file):
+            await app.send_message(sender, "❌ File not found!")
+            return
+
+        file_size = os.path.getsize(file)
+        start = await app.send_message(
+            sender, 
+            f"ℹ️ File size: {file_size / (1024 * 1024):.2f} MB"
+        )
+        
+        # Set part size to slightly less than 2GB to be safe
+        PART_SIZE = 1.9 * 1024 * 1024 * 1024
+
+        part_number = 0
+        async with aiofiles.open(file, mode="rb") as f:
+            while True:
+                chunk = await f.read(int(PART_SIZE))
+                if not chunk:
+                    break
+
+                # Create part filename
+                base_name, file_ext = os.path.splitext(file)
+                part_file = f"{base_name}.part{str(part_number).zfill(3)}{file_ext}"
+
+                # Write part to file
+                async with aiofiles.open(part_file, mode="wb") as part_f:
+                    await part_f.write(chunk)
+
+                # Upload part
+                edit = await app.send_message(
+                    sender, 
+                    f"⬆️ Uploading part {part_number + 1}..."
+                )
+                
+                part_caption = f"{caption}\n\n**Part : {part_number + 1}**"
+                
+                try:
+                    await app.send_document(
+                        sender,
+                        document=part_file,
+                        caption=part_caption,
+                        parse_mode=ParseMode.MARKDOWN,
+                        progress=progress_bar,
+                        progress_args=(
+                            "╭─────────────────────╮\n│ **__Pyro Uploader__**\n├─────────────────────",
+                            edit,
+                            time.time()
+                        )
+                    )
+                except Exception as e:
+                    logger.error(f"Error uploading part {part_number + 1}: {e}")
+                    await edit.edit(f"❌ Error uploading part {part_number + 1}: {str(e)}")
+                    return
+                finally:
+                    await edit.delete()
+                    if os.path.exists(part_file):
+                        os.remove(part_file)
+
+                part_number += 1
+
+        await start.delete()
+        
+    except Exception as e:
+        logger.error(f"Error in split_and_upload_file: {e}")
+        await app.send_message(sender, f"❌ Error processing file: {str(e)}")
+    finally:
+        if os.path.exists(file):
+            os.remove(file)
