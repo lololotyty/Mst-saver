@@ -17,6 +17,7 @@ import time
 import random
 import string
 import asyncio
+import logging
 from pyrogram import filters, Client
 from devgagan import app
 from config import API_ID, API_HASH, FREEMIUM_LIMIT, PREMIUM_LIMIT, OWNER_ID
@@ -29,6 +30,9 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import subprocess
 from devgagan.modules.shrink import is_user_verified
 import re
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 async def generate_random_name(length=8):
     return ''.join(random.choices(string.ascii_lowercase, k=length))
