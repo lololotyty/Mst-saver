@@ -68,10 +68,26 @@ async def chk_user(message, user_id):
 async def gen_link(app, chat_id):
     """Generate invite link for a chat"""
     try:
-        link = await app.export_chat_invite_link(chat_id)
-        return link
+        # First try to get chat info to validate chat_id
+        try:
+            chat = await app.get_chat(chat_id)
+            if not chat:
+                logger.error(f"Chat not found: {chat_id}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting chat info: {e}")
+            return None
+
+        # Then try to generate invite link
+        try:
+            link = await app.export_chat_invite_link(chat_id)
+            return link
+        except Exception as e:
+            logger.error(f"Error generating invite link: {e}")
+            return None
+            
     except Exception as e:
-        logger.error(f"Error generating invite link: {e}")
+        logger.error(f"Error in gen_link: {e}")
         return None
 
 async def subscribe(app, message):
@@ -81,27 +97,42 @@ async def subscribe(app, message):
         return 0
         
     try:
-        url = await gen_link(app, update_channel)
-        if not url:
+        # First verify the channel exists
+        try:
+            chat = await app.get_chat(update_channel)
+            if not chat:
+                logger.error("Update channel not found")
+                return 0
+        except Exception as e:
+            logger.error(f"Error getting update channel: {e}")
             return 0
             
-        user = await app.get_chat_member(update_channel, message.from_user.id)
-        if user.status == "kicked":
-            await message.reply_text("You are Banned. Contact -- @Shimps_bot")
+        # Then try to get/generate invite link
+        url = await gen_link(app, update_channel)
+        if not url:
+            logger.error("Could not generate invite link")
+            return 0
+            
+        try:
+            user = await app.get_chat_member(update_channel, message.from_user.id)
+            if user.status == "kicked":
+                await message.reply_text("You are Banned. Contact -- @Shimps_bot")
+                return 1
+                
+        except UserNotParticipant:
+            caption = "Join our channel to use the bot"
+            await message.reply_photo(
+                photo="https://graph.org/file/94027ad785c6ba022fcd0-1d4e0c2f339471ce84.jpg",
+                caption=caption,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Join Now...", url=url)]])
+            )
             return 1
             
-    except UserNotParticipant:
-        caption = "Join our channel to use the bot"
-        await message.reply_photo(
-            photo="https://graph.org/file/94027ad785c6ba022fcd0-1d4e0c2f339471ce84.jpg",
-            caption=caption,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Join Now...", url=url)]])
-        )
-        return 1
     except Exception as e:
         logger.error(f"Error in subscribe: {e}")
         await message.reply_text("Something Went Wrong. Contact us @Shimps_bot")
         return 1
+        
     return 0
 
 async def get_seconds(time_string):
@@ -227,93 +258,33 @@ def video_metadata(file_path):
             'duration': 0
         }
 
-async def screenshot(file, duration, sender):
-    """Generate video thumbnail"""
+async def screenshot(video_path, duration, user_id):
+    """Generate video screenshot"""
     try:
-        if not file or not os.path.exists(file):
+        if not os.path.exists(video_path):
             return None
             
-        thumbnail_path = f"{sender}_thumb.jpg"
-        cap = cv2.VideoCapture(file)
+        timestamp = duration // 2
+        thumbnail_path = f"thumb_{user_id}_{int(time.time())}.jpg"
         
-        # Set position to 20% of duration
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(duration * 0.2 * cap.get(cv2.CAP_PROP_FPS)))
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, timestamp * cap.get(cv2.CAP_PROP_FPS))
+        ret, frame = cap.read()
         
-        success, frame = cap.read()
-        if success:
+        if ret:
             cv2.imwrite(thumbnail_path, frame)
-            if os.path.exists(thumbnail_path):
-                return thumbnail_path
+            cap.release()
+            return thumbnail_path
+            
+        cap.release()
         return None
         
     except Exception as e:
         logger.error(f"Error generating screenshot: {e}")
         return None
-    finally:
-        if 'cap' in locals():
-            cap.release()
 
-async def get_chat_id(app, chat_link):
-    """Get chat ID from a channel username or invite link"""
-    try:
-        # Handle t.me links
-        if 't.me/' in chat_link:
-            username = chat_link.split('t.me/')[1].split('/')[0]
-        else:
-            username = chat_link.split('/')[-1]
-            
-        # Remove any trailing message ID
-        username = username.split('?')[0]
-        
-        try:
-            # Try getting chat info
-            chat = await app.get_chat(username)
-            return chat.id, None
-        except Exception as e:
-            # If username lookup fails, try joining if it's a private channel
-            try:
-                if 'joinchat' in chat_link or '+' in chat_link:
-                    await app.join_chat(chat_link)
-                    chat = await app.get_chat(chat_link)
-                    return chat.id, None
-            except Exception as join_error:
-                return None, f"Failed to join chat: {str(join_error)}"
-                
-            return None, f"Could not find chat: {str(e)}"
-            
-    except Exception as e:
-        return None, f"Error processing link: {str(e)}"
-
-async def progress_callback(current, total, progress_message):
-    """Handle progress updates for file operations"""
-    try:
-        percent = (current / total) * 100
-        global last_update_time
-        current_time = time.time()
-
-        if current_time - last_update_time >= 10 or percent % 10 == 0:
-            completed_blocks = int(percent // 10)
-            remaining_blocks = 10 - completed_blocks
-            progress_bar = "♦" * completed_blocks + "◇" * remaining_blocks
-            current_mb = current / (1024 * 1024)
-            total_mb = total / (1024 * 1024)
-            
-            await progress_message.edit(
-                f"╭──────────────────╮\n"
-                f"│        **__Uploading...__**       \n"
-                f"├──────────\n"
-                f"│ {progress_bar}\n\n"
-                f"│ **__Progress:__** {percent:.2f}%\n"
-                f"│ **__Uploaded:__** {current_mb:.2f} MB / {total_mb:.2f} MB\n"
-                f"╰──────────────────╯\n\n"
-                f"**__Powered by Shimperd__**"
-            )
-            last_update_time = current_time
-    except Exception as e:
-        logger.error(f"Error in progress callback: {e}")
-
-async def progress_bar(current, total, ud_type, message, start):
-    """Show progress bar for file operations"""
+async def progress_callback(current, total, ud_type, message, start):
+    """Progress callback for uploads/downloads"""
     try:
         now = time.time()
         diff = now - start
