@@ -176,25 +176,35 @@ async def userbot_join(userbot, invite_link):
         logger.error(f"Error joining chat: {e}")
         return f"An error occurred: {str(e)}"
 
-async def get_link(app, message):
-    """Get chat link"""
-    try:
-        chat = message.text.split()[1]
+def get_link(text, message=None):
+    """Extract URL from text or get chat link"""
+    if message:
+        # Original chat link functionality
         try:
-            chat = int(chat)
-        except ValueError:
-            pass
-        
-        try:
-            link = await app.export_chat_invite_link(chat)
-            return link
-        except Exception as e:
-            logger.error(f"Error getting chat link: {e}")
-            return None
+            chat = text.split()[1]
+            try:
+                chat = int(chat)
+            except ValueError:
+                pass
             
-    except Exception as e:
-        logger.error(f"Error in get_link: {e}")
-        return None
+            try:
+                link = await app.export_chat_invite_link(chat)
+                return link
+            except Exception as e:
+                logger.error(f"Error getting chat link: {e}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in get_link: {e}")
+            return None
+    else:
+        # URL extraction functionality
+        regex = r"(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»""'']))"
+        try:
+            urls = re.findall(regex, text)
+            return urls[0][0] if urls else False
+        except Exception:
+            return False
 
 def video_metadata(file_path):
     """Extract video metadata"""
