@@ -176,7 +176,7 @@ async def userbot_join(userbot, invite_link):
         logger.error(f"Error joining chat: {e}")
         return f"An error occurred: {str(e)}"
 
-def get_link(text, message=None):
+async def get_link(text, message=None):
     """Extract URL from text or get chat link"""
     if message:
         # Original chat link functionality
