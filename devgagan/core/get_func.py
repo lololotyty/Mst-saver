@@ -35,7 +35,7 @@ from devgagan.core.func import (
     chk_user,
     subscribe,
     gen_link,
-    progress_bar,
+    progress_callback,
     get_chat_id,
     split_and_upload_file,
     video_metadata
@@ -85,7 +85,7 @@ def thumbnail(sender):
 
 async def fetch_upload_method(user_id):
     """Fetch user's preferred upload method"""
-    user_data = collection.find_one({"user_id": user_id})
+    user_data = sessions_collection.find_one({"user_id": user_id})
     return user_data.get("upload_method", "Pyrogram") if user_data else "Pyrogram"
 
 async def format_caption_to_html(caption: str) -> str:
@@ -165,7 +165,7 @@ async def download_and_process_media(userbot, msg, edit):
     try:
         file = await userbot.download_media(
             msg,
-            progress=progress_bar,
+            progress=progress_callback,
             progress_args=(
                 "╭─────────────────────╮\n│ **__Downloading...__**\n├─────────────────────",
                 edit,
@@ -189,7 +189,7 @@ async def upload_processed_media(app, msg, file, sender, edit):
             sender,
             document=file,
             caption=msg.caption,
-            progress=progress_bar,
+            progress=progress_callback,
             progress_args=(
                 "╭─────────────────────╮\n│ **__Uploading...__**\n├─────────────────────",
                 edit,
@@ -200,11 +200,63 @@ async def upload_processed_media(app, msg, file, sender, edit):
         logger.error(f"Error uploading media: {str(e)}")
         await edit.edit(f"❌ Upload failed: {str(e)}")
 
+async def clone_message(app, msg, target_chat_id, topic_id, edit_id, log_group):
+    """Clone a message to target chat"""
+    edit = await app.edit_message_text(target_chat_id, edit_id, "Cloning...")
+    devgaganin = await app.send_message(target_chat_id, msg.text.markdown, reply_to_message_id=topic_id)
+    await devgaganin.copy(log_group)
+    await edit.delete()
+
+async def clone_text_message(app, msg, target_chat_id, topic_id, edit_id, log_group):
+    """Clone a text message to target chat"""
+    edit = await app.edit_message_text(target_chat_id, edit_id, "Cloning text message...")
+    devgaganin = await app.send_message(target_chat_id, msg.text.markdown, reply_to_message_id=topic_id)
+    await devgaganin.copy(log_group)
+    await edit.delete()
+
+async def handle_sticker(app, msg, target_chat_id, topic_id, edit_id, log_group):
+    """Handle sticker messages"""
+    edit = await app.edit_message_text(target_chat_id, edit_id, "Handling sticker...")
+    result = await app.send_sticker(target_chat_id, msg.sticker.file_id, reply_to_message_id=topic_id)
+    await result.copy(log_group)
+    await edit.delete()
+
+async def download_user_stories(userbot, chat_id, msg_id, edit, sender):
+    """Download and process user stories"""
+    try:
+        story = await userbot.get_stories(chat_id, msg_id)
+        if not story:
+            await edit.edit("No story available for this user.")
+            return  
+        if not story.media:
+            await edit.edit("The story doesn't contain any media.")
+            return
+
+        await edit.edit("Downloading Story...")
+        file_path = await userbot.download_media(story)
+        
+        if story.media:
+            await edit.edit("Uploading Story...")
+            if story.media == MessageMediaType.VIDEO:
+                await app.send_video(sender, file_path)
+            elif story.media == MessageMediaType.DOCUMENT:
+                await app.send_document(sender, file_path)
+            elif story.media == MessageMediaType.PHOTO:
+                await app.send_photo(sender, file_path)
+
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)  
+            
+        await edit.edit("Story processed successfully.")
+    except RPCError as e:
+        logger.error(f"Failed to fetch story: {e}")
+        await edit.edit(f"Error: {e}")
+
 # Database helper functions
 def load_user_data(user_id, key, default_value=None):
     """Load user data from database"""
     try:
-        user_data = collection.find_one({"_id": user_id})
+        user_data = sessions_collection.find_one({"_id": user_id})
         return user_data.get(key, default_value) if user_data else default_value
     except Exception as e:
         logger.error(f"Error loading {key}: {e}")
@@ -213,7 +265,7 @@ def load_user_data(user_id, key, default_value=None):
 def save_user_data(user_id, key, value):
     """Save user data to database"""
     try:
-        collection.update_one(
+        sessions_collection.update_one(
             {"_id": user_id},
             {"$set": {key: value}},
             upsert=True
