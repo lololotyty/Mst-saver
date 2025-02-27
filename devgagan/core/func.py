@@ -1,15 +1,6 @@
 # ---------------------------------------------------
 # File Name: func.py
-# Description: A Pyrogram bot for downloading files from Telegram channels or groups 
-#              and uploading them back to Telegram.
-# Author: Gagan
-# GitHub: https://github.com/devgaganin/
-# Telegram: https://t.me/team_spy_pro
-# YouTube: https://youtube.com/@dev_gagan
-# Created: 2025-01-11
-# Last Modified: 2025-01-11
-# Version: 2.0.5
-# License: MIT License
+# Description: Core functionality for the Telegram bot
 # ---------------------------------------------------
 
 __all__ = [
@@ -26,7 +17,8 @@ __all__ = [
     'video_metadata',
     'screenshot',
     'progress_callback',
-    'prog_bar'
+    'prog_bar',
+    'get_chat_id'
 ]
 
 import math
@@ -52,12 +44,14 @@ from pyrogram.errors import (
 logger = logging.getLogger(__name__)
 
 async def chk_user(message, user_id):
+    """Check if user is premium or owner"""
     user = await premium_users()
     if user_id in user or user_id in OWNER_ID:
         return 0
     return 1
 
 async def gen_link(app, chat_id):
+    """Generate invite link for a chat"""
     try:
         link = await app.export_chat_invite_link(chat_id)
         return link
@@ -66,6 +60,7 @@ async def gen_link(app, chat_id):
         return None
 
 async def subscribe(app, message):
+    """Handle user subscription to required channels"""
     update_channel = CHANNEL_ID
     if not update_channel:
         return 0
@@ -114,15 +109,8 @@ async def get_seconds(time_string):
         logger.error(f"Error converting time: {e}")
         return 0
 
-PROGRESS_BAR = """
-│ **__Completed:__** {1}/{2}
-│ **__Bytes:__** {0}%
-│ **__Speed:__** {3}/s
-│ **__ETA:__** {4}
-╰─────────────────────╯
-"""
-
 def humanbytes(size):
+    """Convert bytes to human readable format"""
     if not size:
         return ""
     power = 2**10
@@ -134,6 +122,7 @@ def humanbytes(size):
     return str(round(size, 2)) + " " + Dic_powerN[n] + 'B'
 
 def TimeFormatter(milliseconds: int) -> str:
+    """Format milliseconds to readable time string"""
     seconds, milliseconds = divmod(int(milliseconds), 1000)
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
@@ -149,6 +138,7 @@ def TimeFormatter(milliseconds: int) -> str:
     return ", ".join(parts) if parts else "0s"
 
 def convert(seconds):
+    """Convert seconds to HH:MM:SS format"""
     seconds = seconds % (24 * 3600)
     hours = seconds // 3600
     seconds %= 3600
@@ -157,6 +147,7 @@ def convert(seconds):
     return "%d:%02d:%02d" % (hours, minutes, seconds)
 
 async def userbot_join(userbot, invite_link):
+    """Join a chat using userbot"""
     try:
         await userbot.join_chat(invite_link)
         return "Successfully joined the Channel"
@@ -171,6 +162,7 @@ async def userbot_join(userbot, invite_link):
         return "Could not join, try joining manually."
 
 def get_link(string):
+    """Extract URL from string"""
     regex = r"(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»""'']))"
     try:
         urls = re.findall(regex, string)
@@ -179,6 +171,7 @@ def get_link(string):
         return False
 
 def video_metadata(file):
+    """Get video file metadata"""
     default_values = {'width': 1, 'height': 1, 'duration': 1}
     if not os.path.exists(file):
         return default_values
@@ -207,6 +200,7 @@ def video_metadata(file):
             cap.release()
 
 async def screenshot(video_path, duration, user_id):
+    """Generate screenshot from video"""
     try:
         if not os.path.exists(video_path):
             return None
@@ -231,9 +225,53 @@ async def screenshot(video_path, duration, user_id):
         if 'cap' in locals():
             cap.release()
 
+async def get_chat_id(app, chat_link):
+    """
+    Get chat ID from a channel username or invite link
+    Returns: (chat_id, error_message)
+    """
+    try:
+        # Handle t.me links
+        if 't.me/' in chat_link:
+            username = chat_link.split('t.me/')[1].split('/')[0]
+        else:
+            username = chat_link.split('/')[-1]
+            
+        # Remove any trailing message ID
+        username = username.split('?')[0]
+        
+        try:
+            # Try getting chat info
+            chat = await app.get_chat(username)
+            return chat.id, None
+        except Exception as e:
+            # If username lookup fails, try joining if it's a private channel
+            try:
+                if 'joinchat' in chat_link or '+' in chat_link:
+                    await app.join_chat(chat_link)
+                    chat = await app.get_chat(chat_link)
+                    return chat.id, None
+            except Exception as join_error:
+                return None, f"Failed to join chat: {str(join_error)}"
+                
+            return None, f"Could not find chat: {str(e)}"
+            
+    except Exception as e:
+        return None, f"Error processing link: {str(e)}"
+
+# Progress bar constants
+PROGRESS_BAR = """
+│ **__Completed:__** {1}/{2}
+│ **__Bytes:__** {0}%
+│ **__Speed:__** {3}/s
+│ **__ETA:__** {4}
+╰─────────────────────╯
+"""
+
 last_update_time = time.time()
 
 async def progress_callback(current, total, progress_message):
+    """Handle progress updates for file operations"""
     try:
         percent = (current / total) * 100
         global last_update_time
@@ -261,6 +299,7 @@ async def progress_callback(current, total, progress_message):
         logger.error(f"Error in progress callback: {e}")
 
 async def progress_bar(current, total, ud_type, message, start):
+    """Show progress bar for file operations"""
     try:
         now = time.time()
         diff = now - start
