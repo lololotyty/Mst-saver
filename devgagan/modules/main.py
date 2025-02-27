@@ -68,18 +68,22 @@ async def set_interval(user_id, interval_minutes=45):
         interval_set[user_id] = datetime.now() + timedelta(minutes=interval_minutes)
 
 async def initialize_userbot(user_id):
+    """Initialize user bot with session"""
     try:
-        session = await load_user_session(user_id)  # Changed to await here
-        if session:
-            return Client(
-                f"user_{user_id}",
-                api_id=API_ID,
-                api_hash=API_HASH,
-                session_string=session
-            )
+        session = await load_user_session(user_id)
+        if not session:
+            logger.warning(f"No session found for user {user_id}")
+            return None
+            
+        return Client(
+            f"user_{user_id}",
+            api_id=API_ID,
+            api_hash=API_HASH,
+            session_string=session
+        )
     except Exception as e:
         logger.error(f"Error initializing userbot: {e}")
-    return None
+        return None
 
 async def is_normal_tg_link(link):
     return 't.me/' in link and not 'tg://' in link
