@@ -61,10 +61,10 @@ SIZE_LIMIT = 2 * 1024 * 1024 * 1024  # 2GB
 
 # MongoDB setup
 DB_NAME = "smart_users"
-COLLECTION_NAME = "super_user"
+COLLECTION_NAME = "sessions"
 mongo_app = pymongo.MongoClient(MONGODB_CONNECTION_STRING)
 db = mongo_app[DB_NAME]
-collection = db[COLLECTION_NAME]
+sessions_collection = db[COLLECTION_NAME]
 
 # Initialize pro client if STRING is available
 if STRING:
@@ -125,6 +125,81 @@ async def get_msg(userbot, user_id, msg_id, link, retry_count=0, message=None):
             return await get_msg(userbot, user_id, msg_id, link, retry_count + 1, message)
         await message.reply(f"❌ Failed to process message: {str(e)}")
 
+async def copy_message_with_chat_id(app, userbot, sender, chat_id, message_id, edit):
+    """Copy message between chats with proper handling"""
+    try:
+        msg = await userbot.get_messages(chat_id, message_id)
+        if not msg or msg.service or msg.empty:
+            await edit.edit("❌ Invalid message or empty content")
+            return
+
+        # Handle different message types
+        if msg.web_page:
+            await clone_message(app, msg, sender, None, edit.id, LOG_GROUP)
+            return
+
+        if msg.text:
+            await clone_text_message(app, msg, sender, None, edit.id, LOG_GROUP)
+            return
+
+        # Handle media messages
+        if msg.media:
+            file = await download_and_process_media(userbot, msg, edit)
+            if not file:
+                return
+
+            try:
+                await upload_processed_media(app, msg, file, sender, edit)
+            finally:
+                if os.path.exists(file):
+                    os.remove(file)
+        else:
+            await edit.edit("❌ Unsupported message type")
+
+    except Exception as e:
+        logger.error(f"Error in copy_message: {str(e)}")
+        await edit.edit(f"❌ Error: {str(e)}")
+
+async def download_and_process_media(userbot, msg, edit):
+    """Download and process media files"""
+    try:
+        file = await userbot.download_media(
+            msg,
+            progress=progress_bar,
+            progress_args=(
+                "╭─────────────────────╮\n│ **__Downloading...__**\n├─────────────────────",
+                edit,
+                time.time()
+            )
+        )
+        return file
+    except Exception as e:
+        logger.error(f"Error downloading media: {str(e)}")
+        await edit.edit(f"❌ Download failed: {str(e)}")
+        return None
+
+async def upload_processed_media(app, msg, file, sender, edit):
+    """Upload processed media file"""
+    try:
+        if os.path.getsize(file) > SIZE_LIMIT:
+            await split_and_upload_file(app, sender, file, msg.caption)
+            return
+
+        await app.send_document(
+            sender,
+            document=file,
+            caption=msg.caption,
+            progress=progress_bar,
+            progress_args=(
+                "╭─────────────────────╮\n│ **__Uploading...__**\n├─────────────────────",
+                edit,
+                time.time()
+            )
+        )
+    except Exception as e:
+        logger.error(f"Error uploading media: {str(e)}")
+        await edit.edit(f"❌ Upload failed: {str(e)}")
+
 # Database helper functions
 def load_user_data(user_id, key, default_value=None):
     """Load user data from database"""
@@ -155,9 +230,9 @@ save_replacement_words = lambda user_id, replacements: save_user_data(user_id, "
 async def load_user_session(user_id):
     """Load user session from database"""
     try:
-        user_data = await db.get_session(user_id)
-        if user_data:
-            return user_data.get("session")
+        session_data = sessions_collection.find_one({"user_id": str(user_id)})
+        if session_data:
+            return session_data.get("session_string")
         return None
     except Exception as e:
         logger.error(f"Error loading session: {e}")
